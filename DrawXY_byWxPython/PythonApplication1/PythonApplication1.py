@@ -24,6 +24,8 @@ class Coord(Structure):
                 ("Pressure", c_int),
                 ("data", ARRAY5)]
 scoord = Coord()
+preX = -1
+preY = -1
 
 def LoadTPLib():
     # have to load 64bits lib
@@ -65,7 +67,7 @@ def MainProcess():
         #scoord = cast(pRecvData, POINTER(Coord))
        
         
-        print(hex(scoord.length), hex(scoord.ReportID), scoord.state, hex(scoord.x), hex(scoord.y))
+        #print(hex(scoord.length), hex(scoord.ReportID), scoord.state, hex(scoord.x), hex(scoord.y))
         # Debug Information
         '''
         sOutput = "[Receive]"
@@ -75,38 +77,23 @@ def MainProcess():
         print (len(pRecvData), sOutput)
         '''
         
-class SimpleDraw(wx.Frame):
-    def __init__(self, parent, id, title, size=(640, 480)):
-        self.points = []
-        wx.Frame.__init__(self, parent, id, title, size)
+class DrawPanel(wx.Frame):
+    """Draw a line to a panel."""
 
-        self.Bind(wx.EVT_LEFT_DOWN, self.DrawDot)
-        self.Bind(wx.EVT_PAINT, self.Paint)
+    def __init__(self):
+        wx.Frame.__init__(self, None, title="Drawing")
+        self.Bind(wx.EVT_PAINT, self.OnPaint)
 
-        self.SetBackgroundColour("WHITE")
-        self.Centre()
-        self.Show(True)
-        self.buffer = wx.EmptyBitmap(640, 480)  # draw to this
-        dc = wx.BufferedDC(wx.ClientDC(self), self.buffer)
-        dc.Clear()  # black window otherwise
-
-
-    def DrawDot(self, event):
-        global scoord
-        self.points.append(event.GetPosition())
-        if len(self.points) == 2:
-            dc = wx.BufferedDC(wx.ClientDC(self), self.buffer)
-            dc.Clear()
-            dc.SetPen(wx.Pen("#000000", 10, wx.SOLID))
-            x1, y1 = scoord.x #self.points[0]
-            x2, y2 = scoord.y #self.points[1]
-            dc.DrawLine(x1, y1, x2, y2)
-            # reset the list to empty
-            self.points = []
-
-
-    def Paint(self, event):
-        wx.BufferedPaintDC(self, self.buffer)
+    def OnPaint(self, event=None):
+        global scoord, preX, preY
+        dc = wx.PaintDC(self)
+        dc.Clear()
+        dc.SetPen(wx.Pen(wx.BLACK, 4))
+        if (preX != -1):
+            dc.DrawLine(preX, preY, scoord.x, scoord.y)#(0, 0, 50, 50)
+            print(hex(scoord.length), hex(scoord.ReportID), scoord.state, hex(scoord.x), hex(scoord.y))
+        preX = scoord.x
+        preY = scoord.y
 
 
 ########################################################
@@ -117,11 +104,19 @@ def main():
     #print sys.path
     print ("Application start")
 
+
+    #preX = -1
+    #preY = -1
     # Start a thread to run socket server
     start_new_thread(MainProcess, ())
-    app = wx.App(0)
-    SimpleDraw(None, -1, "Paint workflow!")
+
+    app = wx.App(False)
+    frame = DrawPanel()
+    frame.Show()
     app.MainLoop()
+    #app = wx.App(0)
+    #SimpleDraw(None, -1, "Paint workflow!")
+    #app.MainLoop()
     
 
     #wait the user key 'q' to exit
