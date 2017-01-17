@@ -39,7 +39,7 @@ def LoadTPLib():
 
 
 # Start a socket server
-def MainProcess():
+def MainProcess(refresh_callback):
     # set global variable
     global g_ElanTouchdll
 
@@ -59,6 +59,7 @@ def MainProcess():
     #print(pRecvData[0:6])
     nReadDataLen = 16
     while True:
+        refresh_callback()
         #scoord = Coord(1,2,3,4,5,6)
         #nRet = g_ElanTouchdll.UB_Readdata(byref(pRecvData), nReadDataLen)
         nRet = g_ElanTouchdll.UB_Readdata(byref(scoord), nReadDataLen)
@@ -83,14 +84,23 @@ class DrawPanel(wx.Frame):
     def __init__(self):
         wx.Frame.__init__(self, None, title="Drawing")
         self.Bind(wx.EVT_PAINT, self.OnPaint)
+        #self.Bind(wx.EVT_PAINT, self.Paint)
+        #self.SetBackgroundColour("WHITE")
+        self.Centre()
+        self.Show(True)
+        self.buffer = wx.EmptyBitmap(1920, 1080)  # draw to this
+        dc = wx.BufferedDC(wx.ClientDC(self), self.buffer)
+        dc.Clear()  # black window otherwise
 
     def OnPaint(self, event=None):
         global scoord, preX, preY
-        dc = wx.PaintDC(self)
-        dc.Clear()
+        dc = wx.BufferedDC(wx.ClientDC(self), self.buffer)
+        #dc = wx.PaintDC(self)
+        #dc.Clear()
         dc.SetPen(wx.Pen(wx.BLACK, 4))
         if (preX != -1):
             dc.DrawLine(preX, preY, scoord.x, scoord.y)#(0, 0, 50, 50)
+            #wx.BufferedPaintDC(self, self.buffer)
             print(hex(scoord.length), hex(scoord.ReportID), scoord.state, hex(scoord.x), hex(scoord.y))
         preX = scoord.x
         preY = scoord.y
@@ -104,20 +114,14 @@ def main():
     #print sys.path
     print ("Application start")
 
-
-    #preX = -1
-    #preY = -1
-    # Start a thread to run socket server
-    start_new_thread(MainProcess, ())
-
     app = wx.App(False)
     frame = DrawPanel()
+
+    # Start a thread to run socket server
+    start_new_thread(MainProcess, (frame.Refresh,))
+
     frame.Show()
-    app.MainLoop()
-    #app = wx.App(0)
-    #SimpleDraw(None, -1, "Paint workflow!")
-    #app.MainLoop()
-    
+    app.MainLoop()  
 
     #wait the user key 'q' to exit
     #objGetch = module1._Getch()
@@ -127,14 +131,7 @@ def main():
         if reply == 'q' : break
         #print(pressedKey)
         if reply == b'q' or reply == 'q':
-            break
-        elif reply == b's':
-            if g_bSendAll == True:
-                g_bSendAll = False
-                print ('[PYInfo]Send each packet mode.')
-            else:
-                g_bSendAll = True
-                print ('[PYInfo]Send all packet mode.')
+            break  
 
     time.sleep(0.5)
 
