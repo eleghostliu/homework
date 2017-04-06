@@ -1,3 +1,4 @@
+import wx
 from random import random
 import sys
 import ConfigParser
@@ -6,8 +7,8 @@ import subprocess
 import getopt
 import threading
 import ctypes
-import module1
-import wx
+import  wx.lib.newevent
+import thread
 from thread import *
 from ctypes import *
 
@@ -20,17 +21,22 @@ class Coord(Structure):
                 ("ReportID", c_ubyte),
                 ("state", c_ubyte),
                 ("x", c_ushort),
+                ("x1", c_ushort),
                 ("y", c_ushort),
+                ("y1", c_ushort),
                 ("Pressure", c_int),
                 ("data", ARRAY5)]
 scoord = Coord()
 preX = -1
 preY = -1
 
+# This creates a new Event class and a EVT binder function
+MooEvent, EVT_MOO = wx.lib.newevent.NewEvent()
+
 def LoadTPLib():
     # have to load 64bits lib
     try:
-        ElanTouchdll = windll.LoadLibrary('libusb.dll')
+        ElanTouchdll = windll.LoadLibrary('libusb-0x7.dll')
     except Exception as e:
         ElanTouchdll = None
         print (str(e))
@@ -39,7 +45,7 @@ def LoadTPLib():
 
 
 # Start a socket server
-def MainProcess(refresh_callback):
+def MainProcess(win, *args):
     # set global variable
     global g_ElanTouchdll
 
@@ -56,17 +62,16 @@ def MainProcess(refresh_callback):
     #pRecvData = (c_ubyte * nReadDataLen).from_buffer_copy(bytearray(nReadDataLen))
     pRecvData = Coord()
     nRet = g_ElanTouchdll.UB_Readdata(ctypes.byref(pRecvData), nReadDataLen)
-    #print(pRecvData[0:6])
     nReadDataLen = 16
     while True:
-        refresh_callback()
-        #scoord = Coord(1,2,3,4,5,6)
-        #nRet = g_ElanTouchdll.UB_Readdata(byref(pRecvData), nReadDataLen)
+        #refresh_callback()
         nRet = g_ElanTouchdll.UB_Readdata(byref(scoord), nReadDataLen)
-        #scoord = cast(pRecvData, POINTER(Coord))
-        #scoord = Coord()
-        #scoord = cast(pRecvData, POINTER(Coord))
-       
+        #evt = UpdateBarEvent()
+        
+        #wx.PostEvent(None, evt)
+        wx.PostEvent(win, MooEvent(moo=1))
+        #wx.CallAfter(refresh_callback)
+        #frame.notify()
         
         #print(hex(scoord.length), hex(scoord.ReportID), scoord.state, hex(scoord.x), hex(scoord.y))
         # Debug Information
@@ -77,67 +82,155 @@ def MainProcess(refresh_callback):
             sOutput += ","
         print (len(pRecvData), sOutput)
         '''
-        
-class DrawPanel(wx.Frame):
-    """Draw a line to a panel."""
 
-    def __init__(self):
-        wx.Frame.__init__(self, None, title="Drawing")
+class SketchWindow(wx.Window):
+    def __init__(self, parent, ID):
+        wx.Window.__init__(self, parent, ID)
+        self.SetBackgroundColour("Black")
+        self.color = "Red"
+        self.thickness = 10
+        self.pen = wx.Pen(self.color, self.thickness, wx.SOLID)
+        self.lines = []
+        self.curLine = []
+        self.pos = (0, 0)
+        self.x = 0
+        self.y = 0
+        self.InitBuffer()
+        print("create thread")
+        th = threading.Thread(target=MainProcess, args=(self, ))
+        th.start()
+        time.sleep(1)
+
+        self.Bind(wx.EVT_LEFT_DOWN, self.OnLeftDown)
+        self.Bind(wx.EVT_LEFT_UP, self.OnLeftUp)
+        #self.Bind(wx.EVT_MOTION, self.OnMotion)
+        self.Bind(wx.EVT_SIZE, self.OnSize)
+        self.Bind(wx.EVT_IDLE, self.OnIdle)
         self.Bind(wx.EVT_PAINT, self.OnPaint)
-        #self.Bind(wx.EVT_PAINT, self.Paint)
-        #self.SetBackgroundColour("WHITE")
-        self.Centre()
-        self.Show(True)
-        self.buffer = wx.EmptyBitmap(1920, 1080)  # draw to this
-        dc = wx.BufferedDC(wx.ClientDC(self), self.buffer)
-        dc.Clear()  # black window otherwise
 
-    def OnPaint(self, event=None):
+        self.Bind(EVT_MOO, self.TouchMotion)
+        
+
+    def InitBuffer(self):
+        size = self.GetClientSize()
+        print("w=%d, h=%d" % (size.width, size.height))
+        self.buffer = wx.EmptyBitmap(size.width, size.height)
+        dc = wx.BufferedDC(None, self.buffer)
+        dc.SetBackground(wx.Brush(self.GetBackgroundColour()))
+        dc.Clear()
+        self.DrawLines(dc)
+        self.reInitBuffer = False
+
+    def GetLinesData(self):
+        return self.lines[:]
+
+    def SetLinesData(self, lines):
+        self.lines = lines[:]
+        self.InitBuffer()
+        self.Refresh()
+
+    def OnLeftDown(self, event):
+        self.curLine = []
+        self.pos = event.GetPositionTuple()
+        self.CaptureMouse()
+
+    def OnLeftUp(self, event):
+        if self.HasCapture():
+            self.lines.append((self.color,
+                               self.thickness,
+                               self.curLine))
+            self.curLine = []
+            self.ReleaseMouse()
+
+    def OnMotion(self, event):
+        print("OnMotion")
+        if event.Dragging() and event.LeftIsDown():        
+            dc = wx.BufferedDC(wx.ClientDC(self), self.buffer)
+            self.drawMotion(dc, event)
+        event.Skip()
+
+    def drawMotion(self, dc, event):
+        dc.SetPen(self.pen)
+        newPos = event.GetPositionTuple()
+        coords = self.pos + newPos
+        self.curLine.append(coords)
+        dc.DrawLine(*coords)
+        self.pos = newPos
+
+    def TouchMotion(self, event):
+        print("TouchMotion")
+        #if event.Dragging():
+        dc = wx.BufferedDC(wx.ClientDC(self), self.buffer)
+        self.TouchdrawMotion(dc, event)
+        event.Skip()
+
+    def TouchdrawMotion(self, dc, event):
         global scoord, preX, preY
-        dc = wx.BufferedDC(wx.ClientDC(self), self.buffer)
-        #dc = wx.PaintDC(self)
-        #dc.Clear()
-        dc.SetPen(wx.Pen(wx.BLACK, 4))
+        dc.SetPen(self.pen)
         if (preX != -1):
-            dc.DrawLine(preX, preY, scoord.x, scoord.y)#(0, 0, 50, 50)
-            #wx.BufferedPaintDC(self, self.buffer)
-            print(hex(scoord.length), hex(scoord.ReportID), scoord.state, hex(scoord.x), hex(scoord.y))
-        preX = scoord.x
-        preY = scoord.y
+            #dc.DrawLine(preX, preY, scoord.x, scoord.y)            
+            w,h = self.GetClientSizeTuple()
+            self.x = (scoord.x * w) / 3392
+            self.y = (scoord.y * h) / 2112
+            #dc.DrawPoint(self.x, self.y)
+            dc.DrawLine(preX, preY, self.x, self.y)
+            #dc.DrawLine(preX, preY, scoord.x, scoord.y)
+            print("preX=%d, preY=%d, x=%d, y=%d" % 
+                  (preX, preY, scoord.x, scoord.y))
+        preX = self.x    #scoord.x
+        preY = self.y    #scoord.y
+
+    def OnSize(self, event):
+        print("OnSize")
+        self.reInitBuffer = True
+
+    def OnIdle(self, event):        
+        if self.reInitBuffer:
+            print("OnIdle, reInitBuffer=%d" % self.reInitBuffer)
+            self.InitBuffer()
+            self.Refresh(False)
+
+    def OnPaint(self, event):
+        dc = wx.BufferedPaintDC(self, self.buffer)
+
+    def DrawLines(self, dc):
+        for colour, thickness, line in self.lines:
+            pen = wx.Pen(colour, thickness, wx.SOLID)
+            dc.SetPen(pen)
+            for coords in line:
+                dc.DrawLine(*coords)
+
+    def SetColor(self, color):
+        self.color = color
+        self.pen = wx.Pen(self.color, self.thickness, wx.SOLID)
+
+    def SetThickness(self, num):
+        self.thickness = num
+        self.pen = wx.Pen(self.color, self.thickness, wx.SOLID)
 
 
-########################################################
-# Main Processure
-########################################################
+class SketchFrame(wx.Frame):
+    def __init__(self, parent):
+        wx.Frame.__init__(self, parent, -1, "Sketch Frame",
+                size=(800,600))
+        self.sketch = SketchWindow(self, -1)        
+        self.sketch.Bind(wx.EVT_MOTION, self.OnSketchMotion)
+        self.statusbar = self.CreateStatusBar()
+        self.statusbar.SetFieldsCount(3)
+        self.statusbar.SetStatusWidths([-1, -2, -3])
+        
 
-def main():
-    #print sys.path
-    print ("Application start")
-
-    app = wx.App(False)
-    frame = DrawPanel()
-
-    # Start a thread to run socket server
-    start_new_thread(MainProcess, (frame.Refresh,))
-
-    frame.Show()
-    app.MainLoop()  
-
-    #wait the user key 'q' to exit
-    #objGetch = module1._Getch()
-    reply = input('Enter char:')
-    while True:
-        #pressedKey = objGetch()
-        if reply == 'q' : break
-        #print(pressedKey)
-        if reply == b'q' or reply == 'q':
-            break  
-
-    time.sleep(0.5)
-
-    g_ElanTouchdll.UB_Poweroff()
-    print ("Application end")
-    sys.exit()
+    def OnSketchMotion(self, event):
+        self.statusbar.SetStatusText("Pos: %s" %
+                str(event.GetPositionTuple()), 0)
+        self.statusbar.SetStatusText("Current Pts: %s" %
+                len(self.sketch.curLine), 1)
+        self.statusbar.SetStatusText("Line Count: %s" %
+                len(self.sketch.lines), 2)
+        event.Skip()
 
 if __name__ == '__main__':
-    main()
+    app = wx.PySimpleApp()
+    frame = SketchFrame(None)    
+    frame.Show(True)    
+    app.MainLoop()
